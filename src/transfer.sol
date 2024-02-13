@@ -1,51 +1,125 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.2;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+import "./NftCollection.sol";
 
-contract NFTMARKET {
-    struct Token {
-        IERC721 nft;
+contract NftMarketPlace {
+    struct UnListedToken {
+        address tokenOwner;
+        address collectionAddress;
+        string collectionName;
         uint256 price;
         uint256 tokenId;
-        bool sold;
-        address[] seller; //hem msg.sender hem approve edilen kişiler satabilir
+        address[] seller;
     }
 
-    mapping(uint256 => Token) public Tokenforsale;
+    struct ListedToken {
+        address tokenOwner;
+        address collectionAddress;
+        string collectionName;
+        uint256 price;
+        uint256 tokenId;
+        address[] sellers;
+    }
+
+    struct NFTCollection {
+        string owner;
+        string collectionName;
+        address collectionAddress;
+        UnListedToken[] unlistedTokens;
+        ListedToken[] listedTokens;
+    }
+
+    mapping(uint256 => ListedToken) public Tokenforsale;
+    ListedToken[] public ArrayTokenforsale;
+    uint256 percentageCommission;
+
+    //creator address to Collection Contract address[] mapping
+    mapping(address => mapping(address => NFTCollection)) public ownerCollections;
 
     constructor(uint256 feeamount) {
         percentageCommission = feeamount;
     }
 
-    event startSale(uint256 tokenId, address indexed seller, bool canceled);
+    // event startSale(uint256 tokenId, address indexed seller, bool canceled);
+    event cancelSale(address collectionAddress, uint256 tokenId, address indexed seller, bool canceled);
+    event startSale(
+        address tokenOwner,
+        address collectionAddress,
+        string collectionName,
+        uint256 _price,
+        uint256 _tokenId,
+        address[] sellers
+    );
+    event bought(
+        address tokenOwner,
+        address collectionAddress,
+        string collectionName,
+        uint256 _price,
+        uint256 _tokenId,
+        address[] sellers
+    );
 
-    function startsaleNFT(IERC721 NFT, uint256 _price, uint256 _tokenId, address[] memory sellers) public {
-        NFT.transferFrom(msg.sender, address(this), _tokenId);
-        Tokenforsale[_tokenId] = Token(NFT, _price, _tokenId, false, sellers);
+    function ListedTokenArr(uint256 _tokenId) public {}
 
-        emit startsaleNFT(_tokenId, msg.sender, false);
+    function viewCollection(address userAddr, address collectionAddr) public view returns (NFTCollection memory) {
+        return ownerCollections[userAddr][collectionAddr];
     }
 
-    event cancelSale(uint256 tokenId, address indexed seller, bool canceled);
+    // function viewNFTs() public view returns (ListedToken) {
+    //     return Listed;
+    // }
 
-    function cancelSale(IERC721 NFT, uint256 _price, uint256 _tokenId) public {
-        NFT.transferFrom(address(this), msg.sender, _tokenId);
-        delete Tokenforsale[_tokenId];
+    //kişinin koleksiyonuions[collectionName]ksiyon içeriği göster
+    //listelenmiş NFT göster
+    //listelenmemiş NFT
 
-        emit cancelSale(_tokenId, msg.sender, true);
+    function startsaleNFT(
+        address tokenOwner,
+        address collectionAddress,
+        string memory collectionName,
+        uint256 _price,
+        uint256 _tokenId,
+        address[] memory sellers
+    ) public checkCollectionAddr(collectionAddress) {
+        IERC1155 NFT = IERC1155(collectionAddress);
+        NFT.safeTransferFrom(msg.sender, address(this), _tokenId, 1, "");
+        Tokenforsale[_tokenId] = ListedToken(tokenOwner, collectionAddress, collectionName, _price, _tokenId, sellers);
+
+        //emit startsaleNFT(_tokenId, msg.sender, false);
+        emit startSale(tokenOwner, collectionAddress, collectionName, _price, _tokenId, sellers);
     }
 
-    function buyNFT(IERC721 NFT, uint256 tokenId) public payable {
-        Token memory token = Tokenforsale[tokenId];
+    // function cancelSale(address collectionAddress, uint256 _tokenId) public checkCollectionAddr(collectionAddress) {
+    //     IERC1155 NFT = IERC1155(colllectionAddress);
+    //     NFT.transferFrom(address(this), msg.sender, _tokenId);
+    //     delete Tokenforsale[_tokenId];
+    //
+    //     emit cancelSale(_tokenId, msg.sender, true);
+    // }
+
+    function buyNFT(address collectionAddress, uint256 tokenId) public payable checkCollectionAddr(collectionAddress) {
+        IERC1155 NFT = IERC1155(collectionAddress);
+        ListedToken memory token = Tokenforsale[tokenId];
         require(msg.value >= token.price, "Not enough ETH sent");
 
         for (uint256 i = 0; i < token.sellers.length; i++) {
             payable(token.sellers[i]).transfer(msg.value / token.sellers.length);
         }
 
-        NFT.transferFrom(address(this), msg.sender, tokenId);
+        NFT.safeTransferFrom(address(this), msg.sender, tokenId, 1, "");
         delete Tokenforsale[tokenId];
-        token.sold = true;
+        emit bought(token.tokenOwner, collectionAddress, token.collectionName, token.price, tokenId, token.sellers);
+    }
+
+    modifier isItListed(uint256 _tokenId) {
+        require(Tokenforsale[_tokenId] != bytes4(0x0), "The Token is Not Listed");
+        _;
+    }
+
+    modifier checkCollectionAddr(address collectionAddress) {
+        require(collectionAddress != 0, "Invalid collection address");
+        _;
     }
 }
